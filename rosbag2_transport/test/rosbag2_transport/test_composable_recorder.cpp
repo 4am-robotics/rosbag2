@@ -191,6 +191,22 @@ TEST_P(ComposableRecorderTests, recorder_inner_params_passed_as_append_override)
   ASSERT_TRUE(recorder->demo_attribute_value);
 }
 
+TEST_P(ComposableRecorderTests, rejects_invalid_repeat_transient_local_depths)
+{
+  for (const auto & entry : {"=1", "/map=", "/map=0", "/map=-1", "/map=1garbage",
+      "/map=18446744073709551616"})
+  {
+    rclcpp::NodeOptions opts;
+    opts.append_parameter_override(
+      "record.repeat_transient_local", std::vector<std::string>{entry});
+    opts.append_parameter_override("storage.uri", root_bag_path_.generic_string());
+    opts.append_parameter_override("storage.storage_id", GetParam());
+    EXPECT_THROW(
+      std::make_shared<MockComposableRecorder>(opts, "invalid_repeat_node"),
+      std::invalid_argument) << entry;
+  }
+}
+
 TEST_P(ComposableRecorderTests, recorder_can_parse_parameters_from_file) {
   // _SRC_RESOURCES_DIR_PATH defined in CMakeLists.txt
   rclcpp::NodeOptions opts;
@@ -205,6 +221,8 @@ TEST_P(ComposableRecorderTests, recorder_can_parse_parameters_from_file) {
   opts.append_parameter_override("storage.uri", root_bag_path_.generic_string());
   opts.append_parameter_override("storage.storage_id", GetParam());
 
+  opts.append_parameter_override(
+    "record.repeat_transient_local", std::vector<std::string>{"map", "/tf_static=8"});
   auto recorder = std::make_shared<MockComposableRecorder>(opts, "recorder_params_node");
   auto record_options = recorder->get_record_options();
   auto storage_options = recorder->get_storage_options();
@@ -247,6 +265,8 @@ TEST_P(ComposableRecorderTests, recorder_can_parse_parameters_from_file) {
   EXPECT_EQ(record_options.start_paused, false);
   EXPECT_EQ(record_options.disable_keyboard_controls, true);
   EXPECT_EQ(record_options.use_sim_time, false);
+  const std::unordered_map<std::string, size_t> repeat_topics{{"/map", 1}, {"/tf_static", 8}};
+  EXPECT_EQ(record_options.repeat_transient_local_messages, repeat_topics);
 
   EXPECT_EQ(storage_options.uri, root_bag_path_.generic_string());
   EXPECT_EQ(storage_options.storage_id, GetParam());
