@@ -16,7 +16,9 @@
 
 #include <algorithm>
 #include <chrono>
+#include <ctime>
 #include <filesystem>
+#include <iomanip>
 #include <memory>
 #include <stdexcept>
 #include <string>
@@ -340,8 +342,18 @@ std::string SequentialWriter::format_storage_uri(
   // Right now `base_folder_` is always just the folder name for where to install the bagfile.
   // The name of the folder needs to be queried in case
   // SequentialWriter is opened with a relative path.
+  //
+  // Each split file gets its own local-time timestamp, like ROS 1 rosbag:
+  // <prefix>_<YYYY-MM-DD-HH-MM-SS>_<storage_count>, where <prefix> is the folder name up to the
+  // first '_' (e.g. folder "robot2_2026-11-05-12-03-39" -> "robot2_2026-11-05-12-18-39_1.mcap").
+  const auto folder_name = fs::path(base_folder).filename().generic_string();
+  const auto prefix = folder_name.substr(0, folder_name.find('_'));
+  const std::time_t now = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
+  std::tm local_time{};
+  localtime_r(&now, &local_time);
+
   std::stringstream storage_file_name;
-  storage_file_name << fs::path(base_folder).filename().generic_string() << "_" <<
+  storage_file_name << prefix << "_" << std::put_time(&local_time, "%Y-%m-%d-%H-%M-%S") << "_" <<
     storage_count;
 
   return (fs::path(base_folder) / storage_file_name.str()).generic_string();
