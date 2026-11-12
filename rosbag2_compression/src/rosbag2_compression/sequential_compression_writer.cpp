@@ -322,11 +322,34 @@ void SequentialCompressionWriter::create_topic(
   SequentialWriter::create_topic(topic_with_type, message_definition);
 }
 
+void SequentialCompressionWriter::create_transient_local_topic(
+  const rosbag2_storage::TopicMetadata & topic_with_type, size_t num_last_messages)
+{
+  std::lock_guard<std::recursive_mutex> lock(storage_mutex_);
+  SequentialWriter::create_transient_local_topic(topic_with_type, num_last_messages);
+}
+
+void SequentialCompressionWriter::create_transient_local_topic(
+  const rosbag2_storage::TopicMetadata & topic_with_type,
+  size_t num_last_messages,
+  const rosbag2_storage::MessageDefinition & message_definition)
+{
+  std::lock_guard<std::recursive_mutex> lock(storage_mutex_);
+  SequentialWriter::create_transient_local_topic(
+    topic_with_type, num_last_messages, message_definition);
+}
+
 void SequentialCompressionWriter::remove_topic(
   const rosbag2_storage::TopicMetadata & topic_with_type)
 {
   std::lock_guard<std::recursive_mutex> lock(storage_mutex_);
   SequentialWriter::remove_topic(topic_with_type);
+}
+
+bool SequentialCompressionWriter::take_snapshot()
+{
+  std::lock_guard<std::recursive_mutex> lock(storage_mutex_);
+  return SequentialWriter::take_snapshot();
 }
 
 void SequentialCompressionWriter::compress_file(

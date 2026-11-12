@@ -94,6 +94,15 @@ public:
     const rosbag2_storage::TopicMetadata & topic_with_type,
     const rosbag2_storage::MessageDefinition & message_definition) override;
 
+  void create_transient_local_topic(
+    const rosbag2_storage::TopicMetadata & topic_with_type,
+    size_t num_last_messages) override;
+
+  void create_transient_local_topic(
+    const rosbag2_storage::TopicMetadata & topic_with_type,
+    size_t num_last_messages,
+    const rosbag2_storage::MessageDefinition & message_definition) override;
+
   /**
    * \brief Removes a new topic in the underlying storage.
    * \details Expected to be used if creation of subscription fails and cleanup is needed.
@@ -101,6 +110,8 @@ public:
    * \param topic_with_type name and type identifier of topic to be created
    */
   void remove_topic(const rosbag2_storage::TopicMetadata & topic_with_type) override;
+
+  bool take_snapshot() override;
 
   /**
    * If the compression mode is FILE, write a message to a bagfile.

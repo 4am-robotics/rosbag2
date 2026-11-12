@@ -79,6 +79,10 @@ public:
   /// the Recorder class to decide whether to initialize KeyboardHandler class or not.
   bool disable_keyboard_controls = false;
 
+  /// \brief Per-topic retention depth for repeating transient-local messages on split/snapshot.
+  /// Empty map disables the feature.
+  std::unordered_map<std::string, size_t> repeat_transient_local_messages{};
+
   /// Note: Please don't forget to update the YAML serialization and deserialization logic in
   /// `record_options.cpp` and the test case `test_yaml_serialization_deserialization`
   /// in `test_record_options.cpp` when updating the fields in RecordOptions.

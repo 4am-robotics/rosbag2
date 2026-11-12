@@ -96,6 +96,55 @@ _Splitting by time_: `ros2 bag record -a -d 9000` will split the bag files after
 
 If both splitting by size and duration are enabled, the bag will split at whichever threshold is reached first.
 
+#### Repeating transient-local messages on split and snapshot
+
+When a bag file is split or a snapshot is taken, consumers of the new file may need certain
+transient-local (latched) messages — such as `/map` or `/tf_static` — to be present, even if
+they were not published again during the new file's timespan.
+
+The `--repeat-transient-local` option tells the recorder to retain the last N messages for
+specified topics and prepend them when a new bag file starts (on split) or when a snapshot is
+written.
+
+Format: `--repeat-transient-local <topic>[=<depth>] [...]`
+
+The depth controls how many of the most recent messages are retained per topic. If omitted, the
+default depth is `1`.
+
+Examples:
+
+```bash
+# Repeat last message of /map on each bag split
+$ ros2 bag record -a --repeat-transient-local /map
+
+# Repeat last 5 messages of /tf_static, last 1 of /map
+$ ros2 bag record -a --repeat-transient-local /tf_static=5 /map
+```
+
+This option also works via node parameters as `record.repeat_transient_local`, accepting a list
+of strings in the same `<topic>` or `<topic>=<depth>` format.
+
+**Note**: If a topic has both a QoS profile override (via `--qos-profile-overrides-path`) and is
+listed in `--repeat-transient-local`, the QoS override takes precedence. Ensure the override
+includes `transient_local` durability to receive latched messages.
+
+The cache is bounded per topic, not per publisher or TF frame. In particular, depth `1` on
+`/tf_static` retains only one `TFMessage`, which may omit other static publishers' frames.
+Choose enough depth for all required messages, including updates. Repeated updates from one
+publisher can still evict another publisher's unchanged transforms; no finite latest-N depth
+guarantees permanent TF frame completeness. The recorder does not merge TF messages or
+reconstruct a map. It can only repeat messages that reach the writer's cache. DDS losses and
+message-compression queue drops cannot be repaired by this option. With message compression,
+choose a sufficiently large `--compression-queue-size` (or `0` for an unlimited queue).
+
+Repeated messages keep their payloads (including header stamps); only bag receive/send timestamps
+are moved to the split boundary or earliest snapshot message. Per-file snapshot times reflect
+the written window, while Jazzy's existing bag-level snapshot recording span is unchanged.
+
+This Jazzy backport adds virtual writer methods and changes writer/record-options layouts.
+Rebuild dependent C++ packages and custom writer implementations against the backport;
+do not mix prebuilt rosbag2 writer/compression/transport/Python binaries with these libraries.
+
 #### Recording with compression
 
 By default Rosbag2 does not record with compression enabled. However, compression can be specified using the following CLI options.
