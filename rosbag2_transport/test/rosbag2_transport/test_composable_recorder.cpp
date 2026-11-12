@@ -16,6 +16,8 @@
 
 #include <filesystem>
 #include <memory>
+#include <regex>
+#include <string>
 
 #include "composition_manager_test_fixture.hpp"
 #include "rosbag2_cpp/reader.hpp"
@@ -51,6 +53,19 @@ public:
   fs::path get_relative_bag_file_path(int split_index) const
   {
     const auto storage_id = GetParam();
+    // Split files are named <prefix>_<YYYY-MM-DD-HH-MM-SS>_<index>, where <prefix> is the bag
+    // folder name up to the first '_'. The timestamp is not known up front, so look it up on disk.
+    const auto folder = root_bag_path_.filename().generic_string();
+    const std::regex split_file(
+      folder.substr(0, folder.find('_')) + "_[0-9]{4}(-[0-9]{2}){5}_" +
+      std::to_string(split_index) + "\\..*");
+    std::error_code ec;
+    for (const auto & entry : fs::directory_iterator(root_bag_path_, ec)) {
+      const auto file_name = entry.path().filename().generic_string();
+      if (std::regex_match(file_name, split_file)) {
+        return file_name;
+      }
+    }
     return fs::path(
       rosbag2_test_common::bag_filename_for_storage_id(get_bag_file_name(split_index), storage_id));
   }
@@ -73,14 +88,14 @@ public:
 
   void wait_for_storage_file(std::chrono::duration<float> timeout = std::chrono::seconds(10))
   {
-    const auto storage_path = get_bag_file_path(0);
     const auto start_time = std::chrono::steady_clock::now();
     while (std::chrono::steady_clock::now() - start_time < timeout && rclcpp::ok()) {
-      if (fs::exists(storage_path)) {
+      if (fs::exists(get_bag_file_path(0))) {
         return;
       }
       std::this_thread::sleep_for(50ms);  // wait a bit to not query constantly
     }
+    const auto storage_path = get_bag_file_path(0);
     ASSERT_EQ(fs::exists(storage_path), true)
       << "Could not find storage file: \"" << storage_path.generic_string() << "\"";
   }

@@ -16,6 +16,7 @@
 
 #include <filesystem>
 #include <memory>
+#include <regex>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -94,6 +95,14 @@ public:
   std::unique_ptr<rosbag2_cpp::Writer> writer_;
   std::string fake_storage_uri_;
   const std::string bag_base_dir_ = "test_bag";
+  // Split files are named <prefix>_<YYYY-MM-DD-HH-MM-SS>_<index>, where <prefix> is the bag
+  // folder name up to the first '_'. Drop the timestamp so file names can be compared.
+  const std::string split_prefix_ = "test";
+  static std::string without_timestamp(const std::string & path)
+  {
+    static const std::regex timestamp("_[0-9]{4}(-[0-9]{2}){5}_");
+    return std::regex_replace(path, timestamp, "_");
+  }
 };
 
 std::shared_ptr<rosbag2_storage::SerializedBagMessage> make_test_msg()
@@ -393,11 +402,11 @@ TEST_F(SequentialWriterTest, writer_splits_when_storage_bagfile_size_gt_max_bagf
   int counter = 0;
   for (const auto & path : fake_metadata_.relative_file_paths) {
     std::stringstream ss;
-    ss << bag_base_dir_ << "_" << counter;
+    ss << split_prefix_ << "_" << counter;
 
     const auto expected_path = ss.str();
     counter++;
-    EXPECT_EQ(expected_path, path);
+    EXPECT_EQ(expected_path, without_timestamp(path));
   }
 }
 
@@ -493,11 +502,11 @@ TEST_F(
   int counter = 0;
   for (const auto & path : fake_metadata_.relative_file_paths) {
     std::stringstream ss;
-    ss << bag_base_dir_ << "_" << counter;
+    ss << split_prefix_ << "_" << counter;
 
     const auto expected_path = ss.str();
     counter++;
-    EXPECT_EQ(expected_path, path);
+    EXPECT_EQ(expected_path, without_timestamp(path));
   }
 }
 
@@ -714,10 +723,10 @@ TEST_F(SequentialWriterTest, snapshot_writes_to_new_file_with_bag_split)
   ASSERT_EQ(opened_files.size(), 1);
   ASSERT_EQ(closed_files.size(), 1);
 
-  const auto expected_closed = fs::path(storage_options_.uri) / (bag_base_dir_ + "_0");
-  const auto expected_opened = fs::path(storage_options_.uri) / (bag_base_dir_ + "_1");
-  ASSERT_STREQ(closed_files[0].c_str(), expected_closed.generic_string().c_str());
-  ASSERT_STREQ(opened_files[0].c_str(), expected_opened.generic_string().c_str());
+  const auto expected_closed = fs::path(storage_options_.uri) / (split_prefix_ + "_0");
+  const auto expected_opened = fs::path(storage_options_.uri) / (split_prefix_ + "_1");
+  ASSERT_EQ(without_timestamp(closed_files[0]), expected_closed.generic_string());
+  ASSERT_EQ(without_timestamp(opened_files[0]), expected_opened.generic_string());
 
   // Check metadata
   ASSERT_EQ(v_intercepted_update_metadata_.size(), 3u);
@@ -736,7 +745,7 @@ TEST_F(SequentialWriterTest, snapshot_writes_to_new_file_with_bag_split)
 
   ASSERT_FALSE(v_intercepted_update_metadata_[1].files.empty());
   const auto & first_file_info = v_intercepted_update_metadata_[1].files[0];
-  EXPECT_STREQ(first_file_info.path.c_str(), std::string(bag_base_dir_ + "_0").c_str());
+  EXPECT_EQ(without_timestamp(first_file_info.path), split_prefix_ + "_0");
   EXPECT_EQ(first_file_info.message_count, num_expected_msgs);
   EXPECT_EQ(
     std::chrono::time_point_cast<std::chrono::nanoseconds>(
@@ -814,11 +823,11 @@ TEST_F(SequentialWriterTest, snapshot_can_be_called_twice)
 
   for (size_t i = 0; i < opened_files.size(); i++) {
     const auto expected_closed = fs::path(storage_options_.uri) /
-      (bag_base_dir_ + "_" + std::to_string(i));
+      (split_prefix_ + "_" + std::to_string(i));
     const auto expected_opened = fs::path(storage_options_.uri) /
-      (bag_base_dir_ + "_" + std::to_string(i + 1));
-    ASSERT_STREQ(closed_files[i].c_str(), expected_closed.generic_string().c_str());
-    ASSERT_STREQ(opened_files[i].c_str(), expected_opened.generic_string().c_str());
+      (split_prefix_ + "_" + std::to_string(i + 1));
+    ASSERT_EQ(without_timestamp(closed_files[i]), expected_closed.generic_string());
+    ASSERT_EQ(without_timestamp(opened_files[i]), expected_opened.generic_string());
   }
 }
 
@@ -892,12 +901,12 @@ TEST_F(SequentialWriterTest, split_event_calls_callback)
   ASSERT_GE(closed_files.size(), num_splits + 1);
   for (size_t i = 0; i < num_splits + 1; i++) {
     auto expected_closed =
-      fs::path(storage_options_.uri) / (bag_base_dir_ + "_" + std::to_string(i));
+      fs::path(storage_options_.uri) / (split_prefix_ + "_" + std::to_string(i));
     auto expected_opened = (i == num_splits) ?
       // The last opened file shall be empty string when we do "writer->close();"
-      "" : fs::path(storage_options_.uri) / (bag_base_dir_ + "_" + std::to_string(i + 1));
-    EXPECT_EQ(closed_files[i], expected_closed.generic_string());
-    EXPECT_EQ(opened_files[i], expected_opened.generic_string());
+      "" : fs::path(storage_options_.uri) / (split_prefix_ + "_" + std::to_string(i + 1));
+    EXPECT_EQ(without_timestamp(closed_files[i]), expected_closed.generic_string());
+    EXPECT_EQ(without_timestamp(opened_files[i]), expected_opened.generic_string());
   }
 }
 
@@ -956,8 +965,8 @@ TEST_F(SequentialWriterTest, split_event_calls_on_writer_close)
   writer_->close();
 
   ASSERT_TRUE(callback_called);
-  auto expected_closed = fs::path(storage_options_.uri) / (bag_base_dir_ + "_0");
-  EXPECT_EQ(closed_file, expected_closed.generic_string());
+  auto expected_closed = fs::path(storage_options_.uri) / (split_prefix_ + "_0");
+  EXPECT_EQ(without_timestamp(closed_file), expected_closed.generic_string());
   EXPECT_TRUE(opened_file.empty());
 }
 
