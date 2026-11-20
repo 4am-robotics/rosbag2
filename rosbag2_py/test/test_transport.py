@@ -35,6 +35,17 @@ RESOURCES_PATH = Path(os.environ['ROSBAG2_PY_TEST_RESOURCES_DIR'])
 PLAYBACK_UNTIL_TIMESTAMP_REGEX_STRING = r'\[rosbag2_player]: Playback until timestamp: -1'
 
 
+def test_repeat_transient_local_options_conversion():
+    options = rosbag2_py.RecordOptions()
+    assert options.repeat_transient_local_messages == {}
+    options.repeat_transient_local_messages = {'/map': 1, '/tf_static': 8}
+    assert options.repeat_transient_local_messages == {'/map': 1, '/tf_static': 8}
+    with pytest.raises((TypeError, OverflowError)):
+        options.repeat_transient_local_messages = {'/map': -1}
+    with pytest.raises((TypeError, OverflowError)):
+        options.repeat_transient_local_messages = {'/map': 2**64}
+
+
 def test_options_qos_conversion():
     # Tests that the to-and-from C++ conversions are working properly in the pybind structs
     simple_overrides = {

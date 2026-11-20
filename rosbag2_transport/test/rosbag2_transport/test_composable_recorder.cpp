@@ -16,6 +16,8 @@
 
 #include <filesystem>
 #include <memory>
+#include <regex>
+#include <string>
 
 #include "composition_manager_test_fixture.hpp"
 #include "rosbag2_cpp/reader.hpp"
@@ -51,6 +53,19 @@ public:
   fs::path get_relative_bag_file_path(int split_index) const
   {
     const auto storage_id = GetParam();
+    // Split files are named <prefix>_<YYYY-MM-DD-HH-MM-SS>_<index>, where <prefix> is the bag
+    // folder name up to the first '_'. The timestamp is not known up front, so look it up on disk.
+    const auto folder = root_bag_path_.filename().generic_string();
+    const std::regex split_file(
+      folder.substr(0, folder.find('_')) + "_[0-9]{4}(-[0-9]{2}){5}_" +
+      std::to_string(split_index) + "\\..*");
+    std::error_code ec;
+    for (const auto & entry : fs::directory_iterator(root_bag_path_, ec)) {
+      const auto file_name = entry.path().filename().generic_string();
+      if (std::regex_match(file_name, split_file)) {
+        return file_name;
+      }
+    }
     return fs::path(
       rosbag2_test_common::bag_filename_for_storage_id(get_bag_file_name(split_index), storage_id));
   }
@@ -73,14 +88,14 @@ public:
 
   void wait_for_storage_file(std::chrono::duration<float> timeout = std::chrono::seconds(10))
   {
-    const auto storage_path = get_bag_file_path(0);
     const auto start_time = std::chrono::steady_clock::now();
     while (std::chrono::steady_clock::now() - start_time < timeout && rclcpp::ok()) {
-      if (fs::exists(storage_path)) {
+      if (fs::exists(get_bag_file_path(0))) {
         return;
       }
       std::this_thread::sleep_for(50ms);  // wait a bit to not query constantly
     }
+    const auto storage_path = get_bag_file_path(0);
     ASSERT_EQ(fs::exists(storage_path), true)
       << "Could not find storage file: \"" << storage_path.generic_string() << "\"";
   }
@@ -191,6 +206,22 @@ TEST_P(ComposableRecorderTests, recorder_inner_params_passed_as_append_override)
   ASSERT_TRUE(recorder->demo_attribute_value);
 }
 
+TEST_P(ComposableRecorderTests, rejects_invalid_repeat_transient_local_depths)
+{
+  for (const auto & entry : {"=1", "/map=", "/map=0", "/map=-1", "/map=1garbage",
+      "/map=18446744073709551616"})
+  {
+    rclcpp::NodeOptions opts;
+    opts.append_parameter_override(
+      "record.repeat_transient_local", std::vector<std::string>{entry});
+    opts.append_parameter_override("storage.uri", root_bag_path_.generic_string());
+    opts.append_parameter_override("storage.storage_id", GetParam());
+    EXPECT_THROW(
+      std::make_shared<MockComposableRecorder>(opts, "invalid_repeat_node"),
+      std::invalid_argument) << entry;
+  }
+}
+
 TEST_P(ComposableRecorderTests, recorder_can_parse_parameters_from_file) {
   // _SRC_RESOURCES_DIR_PATH defined in CMakeLists.txt
   rclcpp::NodeOptions opts;
@@ -205,6 +236,8 @@ TEST_P(ComposableRecorderTests, recorder_can_parse_parameters_from_file) {
   opts.append_parameter_override("storage.uri", root_bag_path_.generic_string());
   opts.append_parameter_override("storage.storage_id", GetParam());
 
+  opts.append_parameter_override(
+    "record.repeat_transient_local", std::vector<std::string>{"map", "/tf_static=8"});
   auto recorder = std::make_shared<MockComposableRecorder>(opts, "recorder_params_node");
   auto record_options = recorder->get_record_options();
   auto storage_options = recorder->get_storage_options();
@@ -247,6 +280,8 @@ TEST_P(ComposableRecorderTests, recorder_can_parse_parameters_from_file) {
   EXPECT_EQ(record_options.start_paused, false);
   EXPECT_EQ(record_options.disable_keyboard_controls, true);
   EXPECT_EQ(record_options.use_sim_time, false);
+  const std::unordered_map<std::string, size_t> repeat_topics{{"/map", 1}, {"/tf_static", 8}};
+  EXPECT_EQ(record_options.repeat_transient_local_messages, repeat_topics);
 
   EXPECT_EQ(storage_options.uri, root_bag_path_.generic_string());
   EXPECT_EQ(storage_options.storage_id, GetParam());

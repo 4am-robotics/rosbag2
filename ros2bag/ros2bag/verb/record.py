@@ -16,6 +16,7 @@ from argparse import ArgumentParser, FileType
 import datetime
 import os
 import signal
+import sys
 import threading
 import time
 
@@ -36,6 +37,52 @@ from rosbag2_py import Recorder
 from rosbag2_py import RecordOptions
 from rosbag2_py import StorageOptions
 import yaml
+
+
+def split_key_value(entry, default_value=''):
+    """Split a 'key=value' string. Returns (key, value) or (entry, default_value) if no '='."""
+    if '=' in entry:
+        key, value = entry.split('=', 1)
+        return key, value
+    return entry, default_value
+
+
+def parse_repeat_transient_local_topics(values):
+    repeat_topics = {}
+    if not values:
+        return repeat_topics
+
+    for value in values:
+        topic, depth_str = split_key_value(value, '1')
+
+        if not topic:
+            raise ValueError(
+                f'Invalid value for --repeat-transient-local: "{value}". '
+                'Topic name must not be empty.')
+        if not depth_str:
+            raise ValueError(
+                f'Invalid value for --repeat-transient-local: "{value}". '
+                'Expected format <topic> or <topic>=<depth>.')
+        if not depth_str.isascii() or not depth_str.isdecimal():
+            raise ValueError(
+                f'Invalid depth for --repeat-transient-local: "{value}". '
+                'Depth must be a positive integer.')
+        try:
+            depth = int(depth_str)
+        except ValueError as exc:
+            raise ValueError(
+                f'Invalid depth for --repeat-transient-local: "{value}". '
+                'Depth must be a positive integer.') from exc
+        if depth <= 0:
+            raise ValueError(
+                f'Invalid depth for --repeat-transient-local: "{value}". '
+                'Depth must be greater than 0.')
+        if depth > sys.maxsize * 2 + 1:
+            raise ValueError('Depth for --repeat-transient-local exceeds size_t range.')
+
+        repeat_topics[topic] = depth
+
+    return repeat_topics
 
 
 def add_recorder_arguments(parser: ArgumentParser) -> None:
@@ -180,6 +227,11 @@ def add_recorder_arguments(parser: ArgumentParser) -> None:
              'the "/rosbag2_recorder/snapshot" service is called. e.g. \n '
              'ros2 service call /rosbag2_recorder/snapshot rosbag2_interfaces/Snapshot')
     parser.add_argument(
+        '--repeat-transient-local', type=str, default=[], metavar='Topic[=Depth]', nargs='+',
+        help='Space-delimited list of transient-local topics whose last messages should be '
+             'prepended on bag split and snapshot writes. Format: <topic> or <topic>=<depth>. '
+             'Default depth is 1 when omitted.')
+    parser.add_argument(
         '--log-level', type=str, default='info',
         choices=['debug', 'info', 'warn', 'error', 'fatal'],
         help='Logging level.')
@@ -285,6 +337,14 @@ def validate_parsed_arguments(args, uri) -> str:
     if args.compression_queue_size < 0:
         return print_error('Compression queue size must be at least 0.')
 
+    try:
+        args.repeat_transient_local_messages = parse_repeat_transient_local_topics(
+            args.repeat_transient_local)
+    except ValueError as exc:
+        return print_error(str(exc))
+
+    return None
+
 
 # Create termination event
 termination_requested = threading.Event()
@@ -369,6 +429,7 @@ class RecordVerb(VerbExtension):
         record_options.ignore_leaf_topics = args.ignore_leaf_topics
         record_options.use_sim_time = args.use_sim_time
         record_options.disable_keyboard_controls = args.disable_keyboard_controls
+        record_options.repeat_transient_local_messages = args.repeat_transient_local_messages
 
         recorder = Recorder(storage_options, record_options, args.log_level, args.node_name)
 

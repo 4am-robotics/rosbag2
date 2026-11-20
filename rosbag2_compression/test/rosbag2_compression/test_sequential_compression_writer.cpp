@@ -17,6 +17,7 @@
 #include <filesystem>
 #include <fstream>
 #include <memory>
+#include <regex>
 #include <string>
 #include <utility>
 #include <vector>
@@ -152,6 +153,14 @@ public:
   // uses in callback from cache_consumer thread
   std::string fake_storage_uri_;
   const std::string bag_base_dir_ = "test_bag";
+  // Split files are named <prefix>_<YYYY-MM-DD-HH-MM-SS>_<index>, where <prefix> is the bag
+  // folder name up to the first '_'. Drop the timestamp so file names can be compared.
+  const std::string split_prefix_ = "test";
+  static std::string without_timestamp(const std::string & path)
+  {
+    static const std::regex timestamp("_[0-9]{4}(-[0-9]{2}){5}_");
+    return std::regex_replace(path, timestamp, "_");
+  }
 
   const uint64_t kDefaultCompressionQueueSize = 1;
   const uint64_t kDefaultCompressionQueueThreads = 4;
@@ -304,9 +313,9 @@ TEST_F(SequentialCompressionWriterTest, writer_creates_correct_metadata_relative
   int counter = 0;
   for (const auto & path : intercepted_write_metadata_.relative_file_paths) {
     std::stringstream ss;
-    ss << bag_base_dir_ << "_" << counter << "." << DefaultTestCompressor;
+    ss << split_prefix_ << "_" << counter << "." << DefaultTestCompressor;
     counter++;
-    EXPECT_EQ(ss.str(), path);
+    EXPECT_EQ(ss.str(), without_timestamp(path));
   }
 }
 
@@ -545,12 +554,12 @@ TEST_P(SequentialCompressionWriterTest, split_event_calls_callback_with_msg_comp
   ASSERT_GE(closed_files.size(), num_splits + 1);
   for (size_t i = 0; i < num_splits + 1; i++) {
     auto expected_closed =
-      fs::path(tmp_dir_storage_options_.uri) / (bag_base_dir_ + "_" + std::to_string(i));
+      fs::path(tmp_dir_storage_options_.uri) / (split_prefix_ + "_" + std::to_string(i));
     auto expected_opened = (i == num_splits) ?
       // The last opened file shall be empty string when we do "writer->close();"
-      "" : fs::path(tmp_dir_storage_options_.uri) / (bag_base_dir_ + "_" + std::to_string(i + 1));
-    EXPECT_EQ(closed_files[i], expected_closed.generic_string()) << "i = " << i;
-    EXPECT_EQ(opened_files[i], expected_opened.generic_string()) << "i = " << i;
+      "" : fs::path(tmp_dir_storage_options_.uri) / (split_prefix_ + "_" + std::to_string(i + 1));
+    EXPECT_EQ(without_timestamp(closed_files[i]), expected_closed.generic_string()) << "i = " << i;
+    EXPECT_EQ(without_timestamp(opened_files[i]), expected_opened.generic_string()) << "i = " << i;
   }
 }
 
@@ -615,13 +624,13 @@ TEST_P(SequentialCompressionWriterTest, split_event_calls_callback_with_file_com
   ASSERT_GE(closed_files.size(), num_splits + 1);
   for (size_t i = 0; i < num_splits + 1; i++) {
     auto expected_closed =
-      fs::path(tmp_dir_storage_options_.uri) / (bag_base_dir_ + "_" + std::to_string(i) +
+      fs::path(tmp_dir_storage_options_.uri) / (split_prefix_ + "_" + std::to_string(i) +
       "." + DefaultTestCompressor);
     auto expected_opened = (i == num_splits) ?
       // The last opened file shall be empty string when we do "writer->close();"
-      "" : fs::path(tmp_dir_storage_options_.uri) / (bag_base_dir_ + "_" + std::to_string(i + 1));
-    EXPECT_EQ(closed_files[i], expected_closed.generic_string()) << "i = " << i;
-    EXPECT_EQ(opened_files[i], expected_opened.generic_string()) << "i = " << i;
+      "" : fs::path(tmp_dir_storage_options_.uri) / (split_prefix_ + "_" + std::to_string(i + 1));
+    EXPECT_EQ(without_timestamp(closed_files[i]), expected_closed.generic_string()) << "i = " << i;
+    EXPECT_EQ(without_timestamp(opened_files[i]), expected_opened.generic_string()) << "i = " << i;
   }
 }
 
@@ -691,13 +700,13 @@ TEST_F(SequentialCompressionWriterTest, snapshot_writes_to_new_file_with_file_co
 
   for (size_t i = 0; i < 2; i++) {
     auto expected_closed = fs::path(tmp_dir_storage_options_.uri) /
-      (bag_base_dir_ + "_" + std::to_string(i) + "." + DefaultTestCompressor);
+      (split_prefix_ + "_" + std::to_string(i) + "." + DefaultTestCompressor);
     auto expected_opened = (i == 1) ?
       // The last opened file shall be empty string when we do "writer->close();"
       "" : fs::path(tmp_dir_storage_options_.uri) /
-      (bag_base_dir_ + "_" + std::to_string(i + 1));
-    ASSERT_STREQ(closed_files[i].c_str(), expected_closed.generic_string().c_str());
-    ASSERT_STREQ(opened_files[i].c_str(), expected_opened.generic_string().c_str());
+      (split_prefix_ + "_" + std::to_string(i + 1));
+    ASSERT_EQ(without_timestamp(closed_files[i]), expected_closed.generic_string());
+    ASSERT_EQ(without_timestamp(opened_files[i]), expected_opened.generic_string());
   }
 }
 

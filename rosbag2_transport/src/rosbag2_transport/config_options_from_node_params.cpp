@@ -52,6 +52,17 @@ rcl_interfaces::msg::ParameterDescriptor float_param_description(
   return d;
 }
 
+/// Split a "key=value" string into a pair. If no '=' is found, returns {entry, default_value}.
+std::pair<std::string, std::string> split_key_value(
+  const std::string & entry, const std::string & default_value = "")
+{
+  auto pos = entry.find('=');
+  if (pos == std::string::npos) {
+    return {entry, default_value};
+  }
+  return {entry.substr(0, pos), entry.substr(pos + 1)};
+}
+
 template<typename T>
 typename std::enable_if<std::numeric_limits<T>::is_integer, T>::type
 declare_integer_node_params(
@@ -335,6 +346,43 @@ RecordOptions get_record_options_from_node_params(rclcpp::Node & node)
 
   record_options.disable_keyboard_controls =
     node.declare_parameter<bool>("record.disable_keyboard_controls", false);
+
+  auto repeat_transient_local = node.declare_parameter<std::vector<std::string>>(
+    "record.repeat_transient_local", std::vector<std::string>());
+  for (const auto & entry : repeat_transient_local) {
+    auto [topic_name, depth_str] = param_utils::split_key_value(entry, "1");
+    if (topic_name.empty()) {
+      throw std::invalid_argument(
+              "record.repeat_transient_local topic name cannot be empty.");
+    }
+    if (depth_str.empty()) {
+      throw std::invalid_argument(
+              "record.repeat_transient_local expects entries in <topic> or <topic>=<depth> "
+              "format.");
+    }
+    size_t queue_depth = 1;
+    try {
+      if (depth_str.find_first_not_of("0123456789") != std::string::npos) {
+        throw std::invalid_argument("Invalid depth");
+      }
+      size_t parsed_length = 0;
+      const auto parsed_depth = std::stoull(depth_str, &parsed_length);
+      if (parsed_length != depth_str.size() ||
+        parsed_depth > std::numeric_limits<size_t>::max())
+      {
+        throw std::invalid_argument("Invalid depth");
+      }
+      queue_depth = parsed_depth;
+    } catch (const std::exception &) {
+      throw std::invalid_argument(
+              "record.repeat_transient_local depth must be a positive integer.");
+    }
+    if (queue_depth == 0) {
+      throw std::invalid_argument(
+              "record.repeat_transient_local depth must be greater than 0.");
+    }
+    record_options.repeat_transient_local_messages[topic_name] = queue_depth;
+  }
 
   record_options.use_sim_time = node.get_parameter("use_sim_time").get_value<bool>();
 

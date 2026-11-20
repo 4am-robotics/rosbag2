@@ -16,6 +16,7 @@
 
 #include <filesystem>
 #include <memory>
+#include <regex>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -94,6 +95,14 @@ public:
   std::unique_ptr<rosbag2_cpp::Writer> writer_;
   std::string fake_storage_uri_;
   const std::string bag_base_dir_ = "test_bag";
+  // Split files are named <prefix>_<YYYY-MM-DD-HH-MM-SS>_<index>, where <prefix> is the bag
+  // folder name up to the first '_'. Drop the timestamp so file names can be compared.
+  const std::string split_prefix_ = "test";
+  static std::string without_timestamp(const std::string & path)
+  {
+    static const std::regex timestamp("_[0-9]{4}(-[0-9]{2}){5}_");
+    return std::regex_replace(path, timestamp, "_");
+  }
 };
 
 std::shared_ptr<rosbag2_storage::SerializedBagMessage> make_test_msg()
@@ -393,11 +402,11 @@ TEST_F(SequentialWriterTest, writer_splits_when_storage_bagfile_size_gt_max_bagf
   int counter = 0;
   for (const auto & path : fake_metadata_.relative_file_paths) {
     std::stringstream ss;
-    ss << bag_base_dir_ << "_" << counter;
+    ss << split_prefix_ << "_" << counter;
 
     const auto expected_path = ss.str();
     counter++;
-    EXPECT_EQ(expected_path, path);
+    EXPECT_EQ(expected_path, without_timestamp(path));
   }
 }
 
@@ -493,11 +502,11 @@ TEST_F(
   int counter = 0;
   for (const auto & path : fake_metadata_.relative_file_paths) {
     std::stringstream ss;
-    ss << bag_base_dir_ << "_" << counter;
+    ss << split_prefix_ << "_" << counter;
 
     const auto expected_path = ss.str();
     counter++;
-    EXPECT_EQ(expected_path, path);
+    EXPECT_EQ(expected_path, without_timestamp(path));
   }
 }
 
@@ -714,10 +723,10 @@ TEST_F(SequentialWriterTest, snapshot_writes_to_new_file_with_bag_split)
   ASSERT_EQ(opened_files.size(), 1);
   ASSERT_EQ(closed_files.size(), 1);
 
-  const auto expected_closed = fs::path(storage_options_.uri) / (bag_base_dir_ + "_0");
-  const auto expected_opened = fs::path(storage_options_.uri) / (bag_base_dir_ + "_1");
-  ASSERT_STREQ(closed_files[0].c_str(), expected_closed.generic_string().c_str());
-  ASSERT_STREQ(opened_files[0].c_str(), expected_opened.generic_string().c_str());
+  const auto expected_closed = fs::path(storage_options_.uri) / (split_prefix_ + "_0");
+  const auto expected_opened = fs::path(storage_options_.uri) / (split_prefix_ + "_1");
+  ASSERT_EQ(without_timestamp(closed_files[0]), expected_closed.generic_string());
+  ASSERT_EQ(without_timestamp(opened_files[0]), expected_opened.generic_string());
 
   // Check metadata
   ASSERT_EQ(v_intercepted_update_metadata_.size(), 3u);
@@ -736,7 +745,7 @@ TEST_F(SequentialWriterTest, snapshot_writes_to_new_file_with_bag_split)
 
   ASSERT_FALSE(v_intercepted_update_metadata_[1].files.empty());
   const auto & first_file_info = v_intercepted_update_metadata_[1].files[0];
-  EXPECT_STREQ(first_file_info.path.c_str(), std::string(bag_base_dir_ + "_0").c_str());
+  EXPECT_EQ(without_timestamp(first_file_info.path), split_prefix_ + "_0");
   EXPECT_EQ(first_file_info.message_count, num_expected_msgs);
   EXPECT_EQ(
     std::chrono::time_point_cast<std::chrono::nanoseconds>(
@@ -814,11 +823,11 @@ TEST_F(SequentialWriterTest, snapshot_can_be_called_twice)
 
   for (size_t i = 0; i < opened_files.size(); i++) {
     const auto expected_closed = fs::path(storage_options_.uri) /
-      (bag_base_dir_ + "_" + std::to_string(i));
+      (split_prefix_ + "_" + std::to_string(i));
     const auto expected_opened = fs::path(storage_options_.uri) /
-      (bag_base_dir_ + "_" + std::to_string(i + 1));
-    ASSERT_STREQ(closed_files[i].c_str(), expected_closed.generic_string().c_str());
-    ASSERT_STREQ(opened_files[i].c_str(), expected_opened.generic_string().c_str());
+      (split_prefix_ + "_" + std::to_string(i + 1));
+    ASSERT_EQ(without_timestamp(closed_files[i]), expected_closed.generic_string());
+    ASSERT_EQ(without_timestamp(opened_files[i]), expected_opened.generic_string());
   }
 }
 
@@ -892,12 +901,12 @@ TEST_F(SequentialWriterTest, split_event_calls_callback)
   ASSERT_GE(closed_files.size(), num_splits + 1);
   for (size_t i = 0; i < num_splits + 1; i++) {
     auto expected_closed =
-      fs::path(storage_options_.uri) / (bag_base_dir_ + "_" + std::to_string(i));
+      fs::path(storage_options_.uri) / (split_prefix_ + "_" + std::to_string(i));
     auto expected_opened = (i == num_splits) ?
       // The last opened file shall be empty string when we do "writer->close();"
-      "" : fs::path(storage_options_.uri) / (bag_base_dir_ + "_" + std::to_string(i + 1));
-    EXPECT_EQ(closed_files[i], expected_closed.generic_string());
-    EXPECT_EQ(opened_files[i], expected_opened.generic_string());
+      "" : fs::path(storage_options_.uri) / (split_prefix_ + "_" + std::to_string(i + 1));
+    EXPECT_EQ(without_timestamp(closed_files[i]), expected_closed.generic_string());
+    EXPECT_EQ(without_timestamp(opened_files[i]), expected_opened.generic_string());
   }
 }
 
@@ -956,9 +965,206 @@ TEST_F(SequentialWriterTest, split_event_calls_on_writer_close)
   writer_->close();
 
   ASSERT_TRUE(callback_called);
-  auto expected_closed = fs::path(storage_options_.uri) / (bag_base_dir_ + "_0");
-  EXPECT_EQ(closed_file, expected_closed.generic_string());
+  auto expected_closed = fs::path(storage_options_.uri) / (split_prefix_ + "_0");
+  EXPECT_EQ(without_timestamp(closed_file), expected_closed.generic_string());
   EXPECT_TRUE(opened_file.empty());
+}
+
+TEST_F(SequentialWriterTest, split_prepends_transient_local_messages_to_next_bag)
+{
+  auto sequential_writer = std::make_unique<rosbag2_cpp::writers::SequentialWriter>(
+    std::move(storage_factory_), converter_factory_, std::move(metadata_io_));
+  writer_ = std::make_unique<rosbag2_cpp::Writer>(std::move(sequential_writer));
+
+  storage_options_.max_cache_size = 0;
+  writer_->open(storage_options_, {"rmw_format", "rmw_format"});
+
+  const std::string topic_name = "latched_topic";
+  writer_->create_transient_local_topic({0u, topic_name, "test_msgs/BasicTypes", "", {}, ""}, 1);
+
+  auto first_message = std::make_shared<rosbag2_storage::SerializedBagMessage>();
+  first_message->topic_name = topic_name;
+  first_message->recv_timestamp = 100;
+  first_message->send_timestamp = 100;
+
+  auto second_message = std::make_shared<rosbag2_storage::SerializedBagMessage>();
+  second_message->topic_name = topic_name;
+  second_message->recv_timestamp = 200;
+  second_message->send_timestamp = 200;
+
+  std::vector<std::shared_ptr<const rosbag2_storage::SerializedBagMessage>> prepended_messages;
+  // Repeats use a vector write; original messages use direct writes without the normal cache.
+  EXPECT_CALL(*storage_, write(An<const decltype(prepended_messages) &>()))
+  .WillOnce(Invoke(
+      [&prepended_messages](const decltype(prepended_messages) & messages)
+      {
+        prepended_messages = messages;
+      })
+  );
+  EXPECT_CALL(*storage_,
+    write(An<std::shared_ptr<const rosbag2_storage::SerializedBagMessage>>())).Times(2);
+
+  writer_->write(first_message);
+  writer_->write(second_message);
+
+  writer_->split_bagfile();
+
+  ASSERT_EQ(prepended_messages.size(), 1u);
+  EXPECT_EQ(prepended_messages[0]->topic_name, topic_name);
+  EXPECT_EQ(prepended_messages[0]->recv_timestamp, 200);
+  EXPECT_EQ(prepended_messages[0]->send_timestamp, 200);
+}
+
+TEST_F(SequentialWriterTest, snapshot_merge_prepends_transient_local_messages)
+{
+  std::vector<std::shared_ptr<const rosbag2_storage::SerializedBagMessage>> written_msgs;
+
+  EXPECT_CALL(*storage_, write(An<const decltype(written_msgs) &>()))
+  .WillOnce(Invoke(
+      [&written_msgs](const decltype(written_msgs) & messages)
+      {
+        written_msgs = messages;
+      })
+  );
+
+  auto sequential_writer = std::make_unique<rosbag2_cpp::writers::SequentialWriter>(
+    std::move(storage_factory_), converter_factory_, std::move(metadata_io_));
+
+  storage_options_.max_cache_size = 3;  // Keep the three newest one-byte messages.
+  storage_options_.snapshot_mode = true;
+  sequential_writer->open(storage_options_, {"rmw_format", "rmw_format"});
+
+  const std::string latched_topic = "latched_topic";
+  const std::string data_topic = "data_topic";
+
+  sequential_writer->create_transient_local_topic(
+    {0u, latched_topic, "test_msgs/BasicTypes", "", {}, ""}, 2);
+  sequential_writer->create_topic({0u, data_topic, "test_msgs/BasicTypes", "", {}, ""});
+
+  // Write a latched message to populate the transient local cache
+  auto latched_msg = std::make_shared<rosbag2_storage::SerializedBagMessage>();
+  latched_msg->topic_name = latched_topic;
+  latched_msg->recv_timestamp = 100;
+  latched_msg->send_timestamp = 100;
+  latched_msg->serialized_data = rosbag2_storage::make_serialized_message("A", 1);
+  sequential_writer->write(latched_msg);
+
+  // Simulate a snapshot buffer where the latched message was evicted due to the byte limit,
+  // but still exists in the transient local cache.
+  auto data_msg = std::make_shared<rosbag2_storage::SerializedBagMessage>();
+  data_msg->topic_name = data_topic;
+  data_msg->recv_timestamp = RCUTILS_S_TO_NS(2);
+  data_msg->send_timestamp = RCUTILS_S_TO_NS(2);
+  data_msg->serialized_data = rosbag2_storage::make_serialized_message("B", 1);
+  sequential_writer->write(data_msg);
+
+  latched_msg = std::make_shared<rosbag2_storage::SerializedBagMessage>();
+  latched_msg->topic_name = latched_topic;
+  latched_msg->recv_timestamp = RCUTILS_S_TO_NS(2.5);
+  latched_msg->send_timestamp = RCUTILS_S_TO_NS(2.5);
+  latched_msg->serialized_data = rosbag2_storage::make_serialized_message("C", 1);
+  sequential_writer->write(latched_msg);
+
+  data_msg = std::make_shared<rosbag2_storage::SerializedBagMessage>();
+  data_msg->topic_name = data_topic;
+  data_msg->recv_timestamp = RCUTILS_S_TO_NS(3);
+  data_msg->send_timestamp = RCUTILS_S_TO_NS(3);
+  data_msg->serialized_data = rosbag2_storage::make_serialized_message("D", 1);
+  sequential_writer->write(data_msg);
+
+  sequential_writer->take_snapshot();
+
+  // Verify: Transient local message was merged in with adjusted timestamps.
+  // Transient messages are prepended before snapshot messages, so transient messages comes first.
+  ASSERT_EQ(written_msgs.size(), 4u);
+  EXPECT_EQ(written_msgs[0]->topic_name, latched_topic);
+  EXPECT_EQ(written_msgs[0]->recv_timestamp, RCUTILS_S_TO_NS(2));  // adjusted to T_earliest
+  EXPECT_EQ(written_msgs[0]->send_timestamp, RCUTILS_S_TO_NS(2));
+
+  EXPECT_EQ(written_msgs[1]->topic_name, data_topic);
+  EXPECT_EQ(written_msgs[1]->recv_timestamp, RCUTILS_S_TO_NS(2));
+  EXPECT_EQ(written_msgs[1]->send_timestamp, RCUTILS_S_TO_NS(2));
+
+  EXPECT_EQ(written_msgs[2]->topic_name, latched_topic);
+  EXPECT_EQ(written_msgs[2]->recv_timestamp, RCUTILS_S_TO_NS(2.5));
+  EXPECT_EQ(written_msgs[2]->send_timestamp, RCUTILS_S_TO_NS(2.5));
+
+  EXPECT_EQ(written_msgs[3]->topic_name, data_topic);
+  EXPECT_EQ(written_msgs[3]->recv_timestamp, RCUTILS_S_TO_NS(3));
+  EXPECT_EQ(written_msgs[3]->send_timestamp, RCUTILS_S_TO_NS(3));
+}
+
+TEST_F(SequentialWriterTest, snapshot_preserves_evicted_messages_with_equal_timestamps)
+{
+  std::vector<std::shared_ptr<const rosbag2_storage::SerializedBagMessage>> written_msgs;
+  EXPECT_CALL(*storage_, write(An<const decltype(written_msgs) &>()))
+  .Times(2)
+  .WillRepeatedly(Invoke([&written_msgs](const auto & messages) {written_msgs = messages;}));
+  rosbag2_cpp::writers::SequentialWriter writer(
+    std::move(storage_factory_), converter_factory_, std::move(metadata_io_));
+  storage_options_.snapshot_mode = true;
+  storage_options_.max_cache_size = 3;
+  writer.open(storage_options_, {"rmw_format", "rmw_format"});
+  writer.create_transient_local_topic({0u, "latched", "test_msgs/BasicTypes", "", {}, ""}, 2);
+  writer.create_topic({0u, "data", "test_msgs/BasicTypes", "", {}, ""});
+  for (const auto & [topic, content] :
+    std::vector<std::pair<std::string, std::string>>{
+    {"latched", "A"}, {"data", "B"}, {"latched", "C"}, {"data", "D"}})
+  {
+    auto message = std::make_shared<rosbag2_storage::SerializedBagMessage>();
+    message->topic_name = topic;
+    message->recv_timestamp = 100;
+    message->send_timestamp = 100;
+    message->serialized_data = rosbag2_storage::make_serialized_message(content.c_str(), 1);
+    writer.write(message);
+  }
+  ASSERT_TRUE(writer.take_snapshot());
+  ASSERT_EQ(written_msgs.size(), 4u);
+  for (size_t i = 0; i < written_msgs.size(); ++i) {
+    EXPECT_EQ(written_msgs[i]->serialized_data->buffer[0], "ABCD"[i]);
+    EXPECT_EQ(written_msgs[i]->recv_timestamp, 100);
+  }
+  const std::vector<int64_t> out_of_order_timestamps{300, 500, 100, 400};
+  for (size_t i = 0; i < out_of_order_timestamps.size(); ++i) {
+    auto message = std::make_shared<rosbag2_storage::SerializedBagMessage>();
+    message->topic_name = i % 2 == 0 ? "latched" : "data";
+    message->recv_timestamp = out_of_order_timestamps[i];
+    message->send_timestamp = out_of_order_timestamps[i];
+    message->serialized_data = rosbag2_storage::make_serialized_message("ABCD" + i, 1);
+    writer.write(message);
+  }
+  ASSERT_TRUE(writer.take_snapshot());
+  ASSERT_EQ(written_msgs.size(), 4u);
+  EXPECT_EQ(written_msgs[0]->recv_timestamp, 100);
+  writer.close();
+  const auto & metadata = v_intercepted_update_metadata_.back();
+  EXPECT_EQ(metadata.files[1].starting_time.time_since_epoch().count(), 100);
+  EXPECT_EQ(metadata.files[1].duration.count(), 400);
+}
+
+TEST_F(SequentialWriterTest, automatic_split_metadata_includes_prepended_time_and_counts)
+{
+  rosbag2_cpp::writers::SequentialWriter writer(
+    std::move(storage_factory_), converter_factory_, std::move(metadata_io_));
+  storage_options_.max_cache_size = 0;
+  storage_options_.max_bagfile_duration = 1;
+  writer.open(storage_options_, {"rmw_format", "rmw_format"});
+  writer.create_transient_local_topic({0u, "latched", "test_msgs/BasicTypes", "", {}, ""}, 1);
+  for (const auto timestamp : {RCUTILS_S_TO_NS(10), RCUTILS_S_TO_NS(12)}) {
+    auto message = std::make_shared<rosbag2_storage::SerializedBagMessage>();
+    message->topic_name = "latched";
+    message->recv_timestamp = timestamp;
+    message->send_timestamp = timestamp;
+    writer.write(message);
+  }
+  writer.close();
+  ASSERT_FALSE(v_intercepted_update_metadata_.empty());
+  const auto & metadata = v_intercepted_update_metadata_.back();
+  ASSERT_EQ(metadata.files.size(), 2u);
+  EXPECT_EQ(metadata.files[1].starting_time.time_since_epoch().count(), RCUTILS_S_TO_NS(10));
+  EXPECT_EQ(metadata.files[1].duration.count(), RCUTILS_S_TO_NS(2));
+  EXPECT_EQ(metadata.files[1].message_count, 2u);
+  EXPECT_EQ(metadata.message_count, 3u);
 }
 
 TEST_P(ParametrizedTemporaryDirectoryFixture, split_bag_metadata_has_full_duration) {

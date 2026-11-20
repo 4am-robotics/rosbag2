@@ -17,6 +17,7 @@
 #include <chrono>
 #include <filesystem>
 #include <memory>
+#include <regex>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -131,6 +132,19 @@ public:
   std::string get_bag_file_name(int split_index = 0) const
   {
     const auto storage_id = GetParam();
+    // Split files are named <prefix>_<YYYY-MM-DD-HH-MM-SS>_<index>, where <prefix> is the bag
+    // folder name up to the first '_'. The timestamp is not known up front, so look it up on disk.
+    const auto folder = root_bag_path_.filename().generic_string();
+    const std::regex split_file(
+      folder.substr(0, folder.find('_')) + "_[0-9]{4}(-[0-9]{2}){5}_" +
+      std::to_string(split_index) + "\\..*");
+    std::error_code ec;
+    for (const auto & entry : fs::directory_iterator(root_bag_path_, ec)) {
+      const auto file_name = entry.path().filename().generic_string();
+      if (std::regex_match(file_name, split_file)) {
+        return file_name;
+      }
+    }
     std::stringstream bag_file_name;
     bag_file_name << get_test_name() << "_" << storage_id << "_" << split_index;
     return rosbag2_test_common::bag_filename_for_storage_id(bag_file_name.str(), storage_id);

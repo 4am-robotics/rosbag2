@@ -1,7 +1,7 @@
 import datetime
 import rosbag2_py._storage
 from _typeshed import Incomplete
-from typing import Any, ClassVar, List, overload
+from typing import Any, ClassVar, Dict, List, overload
 
 class PlayOptions:
     clock_publish_frequency: float
@@ -94,6 +94,7 @@ class RecordOptions:
     is_discovery_disabled: bool
     node_prefix: str
     regex: str
+    repeat_transient_local_messages: Dict[str, int]
     rmw_serialization_format: str
     services: List[str]
     start_paused: bool
